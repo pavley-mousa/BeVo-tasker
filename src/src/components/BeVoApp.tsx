@@ -139,7 +139,7 @@ export default function BeVoApp() {
   const [offeringForm, setOfferingForm] = useState({ courseId: "", yearId: "", levelId: "", termId: "", requiresSection: true });
   const [lectureForm, setLectureForm] = useState({ offeringId: "", label: "المحاضرة A", day: "0", start: "09:00", end: "10:30", instructorName: "", room: "", capacity: "100" });
   const [defaultForm, setDefaultForm] = useState({ groupId: "", userId: "" });
-  const [generalRoleForm, setGeneralRoleForm] = useState({ userId: "", role: "college_admin", collegeId: "", yearId: "", levelId: "" });
+  const [generalRoleForm, setGeneralRoleForm] = useState({ userId: "", role: "college_admin", collegeId: "", yearId: "", levelId: "", groupId: "" });
   const [taskForm, setTaskForm] = useState({ offeringId: "", groupId: "", type: "task", title: "", description: "", dueAt: "", reminder: "60", published: true });
   const [resourceForm, setResourceForm] = useState({ offeringId: "", groupId: "", title: "", description: "", driveUrl: "", youtubeUrl: "", playlistUrl: "", published: true });
   const [addSubjectForm, setAddSubjectForm] = useState({ defaultId: "", courseId: "", termId: "", groupName: "", day: "0", start: "09:00", end: "10:30", assistantName: "", room: "", capacity: "30" });
@@ -636,25 +636,61 @@ export default function BeVoApp() {
     try {
       if (!generalRoleForm.userId) throw new Error("اختر الحساب.");
       if (!generalRoleForm.collegeId) throw new Error("تحديد الكلية مطلوب لهذا الدور.");
-      if (generalRoleForm.role === "year_admin") {
+
+      const isYearScopedRole = ["year_admin", "group_admin", "section_admin"].includes(generalRoleForm.role);
+      const isGroupScopedRole = ["group_admin", "section_admin"].includes(generalRoleForm.role);
+
+      if (isYearScopedRole) {
         const selectedYear = byId(data.years, generalRoleForm.yearId);
         const selectedLevel = byId(data.levels, generalRoleForm.levelId);
-        if (!generalRoleForm.collegeId || !generalRoleForm.yearId || !generalRoleForm.levelId) {
-          throw new Error("دور أدمن السنة يحتاج تحديد الكلية والسنة والفرقة.");
+        if (!generalRoleForm.yearId || !generalRoleForm.levelId) {
+          throw new Error("هذا الدور يحتاج تحديد العام الأكاديمي والفرقة.");
         }
         if (selectedYear?.college_id !== generalRoleForm.collegeId || selectedLevel?.college_id !== generalRoleForm.collegeId) {
-          throw new Error("السنة والفرقة يجب أن يتبعا الكلية المختارة.");
+          throw new Error("العام الأكاديمي والفرقة يجب أن يتبعا الكلية المختارة.");
         }
       }
-      const { error } = await supabase.from("role_assignments").insert({
-        user_id: generalRoleForm.userId, role: generalRoleForm.role,
-        college_id: generalRoleForm.collegeId,
-        academic_year_id: generalRoleForm.role === "year_admin" ? generalRoleForm.yearId : null,
-        study_level_id: generalRoleForm.role === "year_admin" ? generalRoleForm.levelId : null,
-        assigned_by: currentUserId, is_active: true,
-      });
-      if (error) throw error;
-      notify("تم تعيين الدور."); refresh();
+
+      if (isGroupScopedRole) {
+        const selectedGroup = byId(data.groups, generalRoleForm.groupId);
+        const selectedOffering = selectedGroup ? byId(data.offerings, selectedGroup.offering_id) : null;
+        if (!selectedGroup || !selectedGroup.is_active || !selectedOffering?.is_active) {
+          throw new Error("اختر جروبًا أو سكشن نشطًا.");
+        }
+        if (
+          selectedOffering.college_id !== generalRoleForm.collegeId ||
+          selectedOffering.academic_year_id !== generalRoleForm.yearId ||
+          selectedOffering.study_level_id !== generalRoleForm.levelId
+        ) {
+          throw new Error("الجروب أو السكشن يجب أن يتبع الكلية والعام والفرقة المختارة.");
+        }
+        if (roleForCode(String(selectedGroup.code || "")) !== generalRoleForm.role) {
+          throw new Error(generalRoleForm.role === "group_admin"
+            ? "أدمن الجروب يتعيّن على الأكواد A إلى D فقط."
+            : "أدمن السكشن يتعيّن على الأكواد A1 إلى D6 فقط.");
+        }
+
+        const { error } = await supabase.rpc("set_group_role_default", {
+          p_group_id: selectedGroup.id,
+          p_role: generalRoleForm.role,
+          p_user_id: generalRoleForm.userId,
+        });
+        if (error) throw error;
+        notify(`تم تعيين ${ROLE_LABELS[generalRoleForm.role]} للنطاق ${selectedGroup.code}.`);
+      } else {
+        const { error } = await supabase.from("role_assignments").insert({
+          user_id: generalRoleForm.userId, role: generalRoleForm.role,
+          college_id: generalRoleForm.collegeId,
+          academic_year_id: generalRoleForm.role === "year_admin" ? generalRoleForm.yearId : null,
+          study_level_id: generalRoleForm.role === "year_admin" ? generalRoleForm.levelId : null,
+          assigned_by: currentUserId, is_active: true,
+        });
+        if (error) throw error;
+        notify(`تم تعيين ${ROLE_LABELS[generalRoleForm.role] || "الدور"}.`);
+      }
+
+      setGeneralRoleForm({ userId: "", role: "college_admin", collegeId: "", yearId: "", levelId: "", groupId: "" });
+      refresh();
     } catch (error) { notify(messageOf(error), "error"); }
     finally { setBusy(false); }
   }
@@ -1280,12 +1316,22 @@ export default function BeVoApp() {
                 <div className="search-box"><Search size={17} /><input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="بحث بالاسم أو البريد أو الرقم الجامعي…" /></div>
                 {data.profiles.filter((row) => row.id !== currentUserId && [fullName(row), row.email, row.student_id].some((value) => String(value || "").toLowerCase().includes(searchText.toLowerCase()))).length ? <div className="table-wrap"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الرقم الجامعي</th><th>الكلية</th><th>حالة الحساب</th></tr></thead><tbody>{data.profiles.filter((row) => row.id !== currentUserId && [fullName(row), row.email, row.student_id].some((value) => String(value || "").toLowerCase().includes(searchText.toLowerCase()))).map((row) => <tr key={row.id}><td><strong>{fullName(row)}</strong></td><td>{row.email || "—"}</td><td>{row.student_id || "—"}</td><td>{byId(data.colleges, row.college_id)?.name || "—"}</td><td><span className="status-pill status-published">{row.account_status || "active"}</span></td></tr>)}</tbody></table></div> : <EmptyState title="لا يوجد مستخدمون مطابقون" detail="قد يكون الحساب جديدًا أو خارج نطاق صلاحيتك." />}
               </Panel>
-              {isRoot ? <Panel title="إسناد دور إداري عام" subtitle="تعيين الأدوار العامة متاح لمدير المنصة فقط؛ الجروبات والسكاشن لها تعيين منفصل." icon={<UserCog size={18} />}><form className="form-grid" onSubmit={assignGeneralRole}>
+              {isRoot ? <Panel title="إسناد دور إداري" subtitle="اختار الدور ثم النطاق الأكاديمي المناسب. أدمن الجروب والسكشن يُسندان إلى نطاقهما مباشرة." icon={<UserCog size={18} />}><form className="form-grid" onSubmit={assignGeneralRole}>
                 <InputField label="المستخدم"><select required value={generalRoleForm.userId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, userId: e.target.value })}><option value="">اختر الحساب</option>{data.profiles.map((row) => <option key={row.id} value={row.id}>{fullName(row)} · {row.email || row.student_id || row.id.slice(0, 8)}</option>)}</select></InputField>
-                <InputField label="الدور"><select value={generalRoleForm.role} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, role: e.target.value, yearId: "", levelId: "" })}><option value="college_admin">أدمن الكلية</option><option value="year_admin">أدمن الدفعة</option><option value="instructor">دكتور / معيد</option></select></InputField>
-                <InputField label="الكلية"><select required value={generalRoleForm.collegeId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, collegeId: e.target.value, yearId: "", levelId: "" })}><option value="">اختر الكلية</option>{data.colleges.filter((row) => row.is_active).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
-                <InputField label="العام"><select required={generalRoleForm.role === "year_admin"} value={generalRoleForm.yearId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, yearId: e.target.value })}><option value="">اختر العام {generalRoleForm.role === "year_admin" ? "(مطلوب)" : "(اختياري)"}</option>{data.years.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></InputField>
-                <InputField label="الفرقة"><select required={generalRoleForm.role === "year_admin"} value={generalRoleForm.levelId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, levelId: e.target.value })}><option value="">اختر الفرقة {generalRoleForm.role === "year_admin" ? "(مطلوب)" : "(اختياري)"}</option>{data.levels.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
+                <InputField label="الدور"><select value={generalRoleForm.role} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, role: e.target.value, yearId: "", levelId: "", groupId: "" })}><option value="college_admin">أدمن الكلية</option><option value="year_admin">أدمن الدفعة</option><option value="group_admin">أدمن الجروب</option><option value="section_admin">أدمن السكشن</option><option value="instructor">دكتور / معيد</option></select></InputField>
+                <InputField label="الكلية"><select required value={generalRoleForm.collegeId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, collegeId: e.target.value, yearId: "", levelId: "", groupId: "" })}><option value="">اختر الكلية</option>{data.colleges.filter((row) => row.is_active).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
+                <InputField label="العام الأكاديمي"><select required={["year_admin", "group_admin", "section_admin"].includes(generalRoleForm.role)} value={generalRoleForm.yearId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, yearId: e.target.value, groupId: "" })}><option value="">اختر العام {["year_admin", "group_admin", "section_admin"].includes(generalRoleForm.role) ? "(مطلوب)" : "(اختياري)"}</option>{data.years.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></InputField>
+                <InputField label="الفرقة"><select required={["year_admin", "group_admin", "section_admin"].includes(generalRoleForm.role)} value={generalRoleForm.levelId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, levelId: e.target.value, groupId: "" })}><option value="">اختر الفرقة {["year_admin", "group_admin", "section_admin"].includes(generalRoleForm.role) ? "(مطلوب)" : "(اختياري)"}</option>{data.levels.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
+                {["group_admin", "section_admin"].includes(generalRoleForm.role) ? <InputField label={generalRoleForm.role === "group_admin" ? "الجروب" : "السكشن"}><select required value={generalRoleForm.groupId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, groupId: e.target.value })}><option value="">اختر {generalRoleForm.role === "group_admin" ? "الجروب" : "السكشن"}</option>{data.groups.filter((group) => {
+                  const offering = byId(data.offerings, group.offering_id);
+                  return group.is_active &&
+                    roleForCode(String(group.code || "")) === generalRoleForm.role &&
+                    offering?.is_active &&
+                    offering.college_id === generalRoleForm.collegeId &&
+                    offering.academic_year_id === generalRoleForm.yearId &&
+                    offering.study_level_id === generalRoleForm.levelId;
+                }).map((group) => <option key={group.id} value={group.id}>{group.code} · {group.name} · {currentCourseNameFrom(data, group.offering_id)}</option>)}</select></InputField> : null}
+                {["group_admin", "section_admin"].includes(generalRoleForm.role) ? <p className="muted form-hint">التعيين يطبّق على نفس الجروب أو السكشن عبر مواد الكلية والعام والفرقة المختارة.</p> : null}
                 <div className="form-submit"><button className="btn btn-primary" disabled={busy} type="submit">إسناد الدور <Plus size={16} /></button></div>
               </form></Panel> : null}
             </div>
