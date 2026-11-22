@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   applicationName: "BeVo",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg" },
+  ...(process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID
+    ? { other: { "google-adsense-account": process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID } }
+    : {}),
   openGraph: {
     type: "website",
     locale: "ar_EG",
