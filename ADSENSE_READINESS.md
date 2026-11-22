@@ -34,7 +34,7 @@ It does not imply that Google has approved BeVo or that ads are currently being 
 5. Select Egypt as the payment country only if it is the country where the account holder lives and can receive the AdSense PIN by mail. The payment country cannot be changed later.
 6. Enter the account and payment details exactly as required by Google and the payment provider.
 7. Accept the AdSense terms and complete the account setup steps.
-8. Add the custom domain under **Sites** and follow the connection/review instructions displayed by AdSense.
+8. Add the custom domain under **Sites**, choose the meta-tag verification method (the app will publish the required `google-adsense-account` meta tag after the client ID is configured), and follow the remaining review instructions displayed by AdSense.
 
 Google site review may take a few days and in some cases 2–4 weeks. Approval is not guaranteed.
 
@@ -52,7 +52,7 @@ Set these in the existing Vercel project for Production (and Preview only if you
 
 Do not invent or reuse another publisher's IDs. Do not place bank details, passwords or Google OAuth secrets in `NEXT_PUBLIC_*` variables.
 
-After setting the IDs, redeploy. Verify:
+After setting the IDs, redeploy. The `NEXT_PUBLIC_ADSENSE_CLIENT_ID` also creates the `google-adsense-account` meta tag in the document head, which can be used as the site's AdSense ownership verification method. Verify:
 
 - The ad script appears only on public guide pages.
 - No ad slots appear in login, student workspace, task, course registration or admin screens.
