@@ -162,6 +162,7 @@ CREATE TRIGGER enforce_role_assignment_scope
 BEFORE INSERT OR UPDATE ON public.role_assignments
 FOR EACH ROW
 EXECUTE FUNCTION private.enforce_role_assignment_scope();
+REVOKE ALL ON FUNCTION private.enforce_role_assignment_scope() FROM PUBLIC, anon, authenticated;
 
 -- Validate shared/default group-role assignments as strictly as direct assignments.
 CREATE OR REPLACE FUNCTION private.enforce_group_role_default_scope()
@@ -230,6 +231,7 @@ CREATE TRIGGER enforce_group_role_default_scope
 BEFORE INSERT OR UPDATE ON public.group_role_defaults
 FOR EACH ROW
 EXECUTE FUNCTION private.enforce_group_role_default_scope();
+REVOKE ALL ON FUNCTION private.enforce_group_role_default_scope() FROM PUBLIC, anon, authenticated;
 
 -- College Admins assign group/section roles through the checked RPC, not direct table writes.
 DROP POLICY IF EXISTS "college admins assign group and section admins" ON public.role_assignments;
