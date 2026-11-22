@@ -261,7 +261,7 @@ export default function BeVoApp() {
         if (!live) return;
         setData({ ...next });
         const metadata = (session.user.user_metadata || {}) as Record<string, unknown>;
-        const googleFullName = String(metadata.full_name || metadata.name || "").trim().split(/\\s+/).filter(Boolean);
+        const googleFullName = String(metadata.full_name || metadata.name || "").trim().split(/\s+/).filter(Boolean);
         const googleFirstName = String(metadata.given_name || googleFullName[0] || "");
         const googleMiddleName = String(metadata.middle_name || (googleFullName.length >= 3 ? googleFullName[1] : ""));
         const googleThirdName = String(metadata.family_name || (googleFullName.length >= 3 ? googleFullName.slice(2).join(" ") : googleFullName[1] || ""));
