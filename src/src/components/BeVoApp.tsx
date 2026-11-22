@@ -45,7 +45,7 @@ const DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربع�
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "مدير المنصة",
   college_admin: "أدمن الكلية",
-  year_admin: "أدمن السنة",
+  year_admin: "أدمن الدفعة",
   section_admin: "أدمن السكشن",
   group_admin: "أدمن الجروب",
   instructor: "دكتور / معيد",
@@ -88,8 +88,8 @@ function timeLabel(time: string | null | undefined) {
   if (!time) return "غير محدد";
   return String(time).slice(0, 5);
 }
-function roleForCode(code: string) {
-  return /^[A-D]$/i.test(code) ? "group_admin" : /^[a-d][1-6]$/i.test(code) ? "section_admin" : "group_admin";
+function roleForCode(code: string): "group_admin" | "section_admin" | null {
+  return /^[A-D]$/i.test(code) ? "group_admin" : /^[a-d][1-6]$/i.test(code) ? "section_admin" : null;
 }
 function isGroupCode(code: string) {
   return /^[A-D]$/i.test(code);
@@ -303,6 +303,7 @@ export default function BeVoApp() {
   const isInstructor = allRoles.includes("instructor");
   const isAcademicAdmin = isRoot || isCollegeAdmin || isYearAdmin;
   const isAdmin = isAcademicAdmin || isScopeAdmin || isInstructor;
+  const canReviewRequests = isRoot || isCollegeAdmin || isYearAdmin || isScopeAdmin;
   const selectedYearIds = data.years.filter((row) => row.is_current && row.is_active).map((row) => row.id);
   const hasCurrentYearForStudent = data.years.some((row) =>
     row.college_id === profile?.college_id && row.is_current && row.is_active
@@ -632,6 +633,7 @@ export default function BeVoApp() {
       const group = byId(data.groups, defaultForm.groupId);
       if (!group) throw new Error("اختر الجروب أو السكشن.");
       const role = roleForCode(String(group.code || ""));
+      if (!role) throw new Error("كود الجروب أو السكشن غير معتمد. استخدم A–D للجروبات أو a1–d6 للسكاشن.");
       const { error } = await supabase.rpc("set_group_role_default", {
         p_group_id: group.id, p_role: role, p_user_id: defaultForm.userId,
       });
@@ -647,6 +649,7 @@ export default function BeVoApp() {
     setBusy(true);
     try {
       if (!generalRoleForm.userId) throw new Error("اختر الحساب.");
+      if (!generalRoleForm.collegeId) throw new Error("تحديد الكلية مطلوب لهذا الدور.");
       if (generalRoleForm.role === "year_admin") {
         const selectedYear = byId(data.years, generalRoleForm.yearId);
         const selectedLevel = byId(data.levels, generalRoleForm.levelId);
@@ -659,8 +662,10 @@ export default function BeVoApp() {
       }
       const { error } = await supabase.from("role_assignments").insert({
         user_id: generalRoleForm.userId, role: generalRoleForm.role,
-        college_id: generalRoleForm.collegeId || null, academic_year_id: generalRoleForm.yearId || null,
-        study_level_id: generalRoleForm.levelId || null, assigned_by: currentUserId, is_active: true,
+        college_id: generalRoleForm.collegeId,
+        academic_year_id: generalRoleForm.role === "year_admin" ? generalRoleForm.yearId : null,
+        study_level_id: generalRoleForm.role === "year_admin" ? generalRoleForm.levelId : null,
+        assigned_by: currentUserId, is_active: true,
       });
       if (error) throw error;
       notify("تم تعيين الدور."); refresh();
@@ -1054,7 +1059,7 @@ export default function BeVoApp() {
                 <div className="stat-card"><span className="stat-icon stat-blue"><BookOpen size={20} /></span><div><small>{isAdmin ? "المواد المتاحة في نطاقك" : "موادي الدراسية"}</small><strong>{isAdmin ? data.offerings.length : mySelections.length}</strong><span>{isAdmin ? "ربط أكاديمي" : "مادة مسجلة"}</span></div></div>
                 <div className="stat-card"><span className="stat-icon stat-violet"><ClipboardList size={20} /></span><div><small>المهام المفتوحة</small><strong>{data.tasks.filter((task) => task.is_published).length}</strong><span>تاسك وتكليف</span></div></div>
                 <div className="stat-card"><span className="stat-icon stat-amber"><Bell size={20} /></span><div><small>إشعارات غير مقروءة</small><strong>{data.notifications.filter((notification) => !notification.read_at).length}</strong><span>تحديث جديد</span></div></div>
-                <div className="stat-card"><span className="stat-icon stat-green"><Users size={20} /></span><div><small>{isAdmin ? "طلبات معلقة" : "حالة التسجيل"}</small><strong>{isAdmin ? data.requests.filter((request) => request.status === "pending").length : hasRegistration ? "✓" : "—"}</strong><span>{isAdmin ? "تحتاج مراجعة" : hasRegistration ? "تم حفظ المواد" : "لم يتم التسجيل بعد"}</span></div></div>
+                <div className="stat-card"><span className="stat-icon stat-green"><Users size={20} /></span><div><small>{canReviewRequests ? "طلبات معلقة" : "حالة التسجيل"}</small><strong>{canReviewRequests ? data.requests.filter((request) => request.status === "pending").length : hasRegistration ? "✓" : "—"}</strong><span>{canReviewRequests ? "تحتاج مراجعة" : hasRegistration ? "تم حفظ المواد" : "لم يتم التسجيل بعد"}</span></div></div>
               </div>
               <div className="content-grid two-col">
                 <Panel title="المواعيد والمهام القادمة" subtitle="المهام المنشورة المرتبطة بموادك." icon={<CalendarDays size={18} />} action={<button className="text-button" onClick={() => jump("tasks")}>عرض الكل <ArrowLeft size={14} /></button>}>
@@ -1075,9 +1080,13 @@ export default function BeVoApp() {
 
           {activeSection === "courses" ? (
             <div className="stack-lg">
-              <div className="page-heading"><div><span className="eyebrow"><BookOpen size={14} /> موادك الدراسية</span><h1>المواد والمحاضرات</h1><p>{isAdmin ? "راجع ربط المواد ومواعيد المحاضرات والسكاشن المتاحة في نطاقك." : "اختار المادة والمحاضرة والسكشن إذا كانت المادة تتطلب سكاشن."}</p></div><button className="btn btn-outline" onClick={refresh} disabled={busy}><RefreshCw size={16} /> تحديث</button></div>
+              <div className="page-heading"><div><span className="eyebrow"><BookOpen size={14} /> موادك الدراسية</span><h1>المواد والمحاضرات</h1><p>{isRoot || isCollegeAdmin ? "إدارة ربط المواد والمحاضرات داخل الكلية." : isYearAdmin ? "إدارة مواد الدفعة والفرقة المسندتين لك." : isScopeAdmin ? "راجع المواد والسكاشن داخل نطاق الجروب أو السكشن المعيّن لك." : isInstructor ? "راجع المواد المسندة لك." : "اختار المادة والمحاضرة والسكشن إذا كانت المادة تتطلب سكاشن."}</p></div><button className="btn btn-outline" onClick={refresh} disabled={busy}><RefreshCw size={16} /> تحديث</button></div>
               {!profile?.college_id ? <EmptyState title="أكمل بياناتك الأكاديمية أولًا" detail="لازم تربط حسابك بالكلية والفرقة قبل عرض المواد." /> : null}
-              {isAdmin ? <AdminCourseCatalog data={data} isRoot={isRoot} isCollegeAdmin={isCollegeAdmin} busy={busy} notify={notify} refresh={refresh} /> : (
+              {(isRoot || isCollegeAdmin) ? <AdminCourseCatalog data={data} isRoot={isRoot} isCollegeAdmin={isCollegeAdmin} busy={busy} notify={notify} refresh={refresh} /> : isYearAdmin ? <YearAdminWorkspace data={data} currentUserId={currentUserId} refresh={refresh} notify={notify} /> : isAdmin ? (
+                <Panel title={isScopeAdmin ? "المواد داخل نطاقك" : "المواد المسندة لك"} subtitle="تعرض هذه الصفحة المواد التي يسمح بها نطاق صلاحيتك، دون أدوات تعديل خارج اختصاصك." icon={<BookOpen size={18} />}>
+                  {manageableOfferings.length ? <div className="table-wrap"><table><thead><tr><th>المادة</th><th>العام</th><th>الفرقة</th><th>الترم</th><th>الجروبات والسكاشن المتاحة</th></tr></thead><tbody>{manageableOfferings.map((row) => <tr key={row.id}><td><strong>{currentCourseName(row.id)}</strong></td><td>{byId(data.years, row.academic_year_id)?.label || "—"}</td><td>{byId(data.levels, row.study_level_id)?.name || "—"}</td><td>{byId(data.terms, row.term_id)?.name || "—"}</td><td>{getGroupsForOffering(row.id).map((group) => group.code).join("، ") || "—"}</td></tr>)}</tbody></table></div> : <EmptyState title="لا توجد مواد ضمن نطاقك حاليًا" detail="تظهر المواد بعد ربطها أو تعيين الجروب أو السكشن لحسابك." />}
+                </Panel>
+              ) : (
                 <>
                   <Panel title={hasRegistration ? "تعديل التسجيل عبر طلب" : "تسجيل المواد"} subtitle={hasRegistration ? "التسجيل المحفوظ لا يتغير مباشرة؛ أرسل طلب تعديل وانتظر موافقة الأدمن." : "اختار المحاضرة والسكشن لكل مادة ترغب في تسجيلها."} icon={<BookMarked size={18} />}>
                     {studentOfferings.length ? <div className="course-selection-list">{studentOfferings.map((offering) => {
@@ -1202,8 +1211,8 @@ export default function BeVoApp() {
           ) : null}
 
           {activeSection === "requests" ? (
-            <Panel title="طلبات التغيير" subtitle={isAdmin ? "راجع طلبات التسجيل ضمن نطاق مسؤوليتك." : "تابع حالة طلبات تغيير التسجيل التي أرسلتها."} icon={<RefreshCw size={18} />}>
-              {data.requests.filter((request) => isAdmin ? true : request.student_id === currentUserId).length ? <div className="request-list">{data.requests.filter((request) => isAdmin ? true : request.student_id === currentUserId).map((request) => <article className="request-card" key={request.id}><div className="request-top"><div><strong>طلب تعديل التسجيل</strong><small>{new Date(request.created_at).toLocaleString("ar-EG")}</small></div><span className={`status-pill ${request.status === "approved" ? "status-published" : request.status === "rejected" ? "status-rejected" : "status-pending"}`}>{request.status === "approved" ? "تمت الموافقة" : request.status === "rejected" ? "مرفوض" : "قيد المراجعة"}</span></div><p>{request.reason}</p>{Array.isArray(request.requested_choices) ? <div className="request-choice-chips">{request.requested_choices.map((choice: Row, index: number) => <span key={`${request.id}-${index}`}>{currentCourseName(choice.offering_id)}</span>)}</div> : null}{isAdmin && request.status === "pending" ? <div className="request-review"><InputField label="ملاحظة للأدمن / الطالب"><input value={requestNotes[request.id] || ""} onChange={(e) => setRequestNotes({ ...requestNotes, [request.id]: e.target.value })} placeholder="ملاحظة (اختياري)" /></InputField><button className="btn btn-primary" disabled={savingRequest === request.id} onClick={() => reviewRequest(request.id, true)}><Check size={15} /> موافقة</button><button className="btn btn-danger-outline" disabled={savingRequest === request.id} onClick={() => reviewRequest(request.id, false)}><X size={15} /> رفض</button></div> : null}</article>)}</div> : <EmptyState title="لا توجد طلبات" detail="أي طلب تعديل جديد سيظهر هنا." />}
+            <Panel title="طلبات التغيير" subtitle={canReviewRequests ? "راجع طلبات التسجيل التي تقع داخل نطاق مسؤوليتك." : "تابع حالة طلبات تغيير التسجيل التي أرسلتها."} icon={<RefreshCw size={18} />}>
+              {data.requests.filter((request) => canReviewRequests ? true : request.student_id === currentUserId).length ? <div className="request-list">{data.requests.filter((request) => canReviewRequests ? true : request.student_id === currentUserId).map((request) => <article className="request-card" key={request.id}><div className="request-top"><div><strong>طلب تعديل التسجيل</strong><small>{new Date(request.created_at).toLocaleString("ar-EG")}</small></div><span className={`status-pill ${request.status === "approved" ? "status-published" : request.status === "rejected" ? "status-rejected" : "status-pending"}`}>{request.status === "approved" ? "تمت الموافقة" : request.status === "rejected" ? "مرفوض" : "قيد المراجعة"}</span></div><p>{request.reason}</p>{Array.isArray(request.requested_choices) ? <div className="request-choice-chips">{request.requested_choices.map((choice: Row, index: number) => <span key={`${request.id}-${index}`}>{currentCourseName(choice.offering_id)}</span>)}</div> : null}{canReviewRequests && request.status === "pending" ? <div className="request-review"><InputField label="ملاحظة للأدمن / الطالب"><input value={requestNotes[request.id] || ""} onChange={(e) => setRequestNotes({ ...requestNotes, [request.id]: e.target.value })} placeholder="ملاحظة (اختياري)" /></InputField><button className="btn btn-primary" disabled={savingRequest === request.id} onClick={() => reviewRequest(request.id, true)}><Check size={15} /> موافقة</button><button className="btn btn-danger-outline" disabled={savingRequest === request.id} onClick={() => reviewRequest(request.id, false)}><X size={15} /> رفض</button></div> : null}</article>)}</div> : <EmptyState title="لا توجد طلبات" detail="أي طلب تعديل جديد سيظهر هنا." />}
             </Panel>
           ) : null}
 
@@ -1221,8 +1230,8 @@ export default function BeVoApp() {
               </Panel>
               {isRoot ? <Panel title="إسناد دور إداري عام" subtitle="تعيين الأدوار العامة متاح لمدير المنصة فقط؛ الجروبات والسكاشن لها تعيين منفصل." icon={<UserCog size={18} />}><form className="form-grid" onSubmit={assignGeneralRole}>
                 <InputField label="المستخدم"><select required value={generalRoleForm.userId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, userId: e.target.value })}><option value="">اختر الحساب</option>{data.profiles.map((row) => <option key={row.id} value={row.id}>{fullName(row)} · {row.email || row.student_id || row.id.slice(0, 8)}</option>)}</select></InputField>
-                <InputField label="الدور"><select value={generalRoleForm.role} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, role: e.target.value })}><option value="college_admin">أدمن الكلية</option><option value="year_admin">أدمن السنة</option><option value="instructor">دكتور / معيد</option></select></InputField>
-                <InputField label="الكلية"><select required={generalRoleForm.role === "year_admin"} value={generalRoleForm.collegeId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, collegeId: e.target.value, yearId: "", levelId: "" })}><option value="">كل الكليات (عند السماح)</option>{data.colleges.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
+                <InputField label="الدور"><select value={generalRoleForm.role} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, role: e.target.value, yearId: "", levelId: "" })}><option value="college_admin">أدمن الكلية</option><option value="year_admin">أدمن الدفعة</option><option value="instructor">دكتور / معيد</option></select></InputField>
+                <InputField label="الكلية"><select required value={generalRoleForm.collegeId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, collegeId: e.target.value, yearId: "", levelId: "" })}><option value="">اختر الكلية</option>{data.colleges.filter((row) => row.is_active).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
                 <InputField label="العام"><select required={generalRoleForm.role === "year_admin"} value={generalRoleForm.yearId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, yearId: e.target.value })}><option value="">اختر العام {generalRoleForm.role === "year_admin" ? "(مطلوب)" : "(اختياري)"}</option>{data.years.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></InputField>
                 <InputField label="الفرقة"><select required={generalRoleForm.role === "year_admin"} value={generalRoleForm.levelId} onChange={(e) => setGeneralRoleForm({ ...generalRoleForm, levelId: e.target.value })}><option value="">اختر الفرقة {generalRoleForm.role === "year_admin" ? "(مطلوب)" : "(اختياري)"}</option>{data.levels.filter((row) => row.is_active && (!generalRoleForm.collegeId || row.college_id === generalRoleForm.collegeId)).map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></InputField>
                 <div className="form-submit"><button className="btn btn-primary" disabled={busy} type="submit">إسناد الدور <Plus size={16} /></button></div>
@@ -1791,7 +1800,7 @@ function AcademicAdmin({ data, currentUserId, isRoot, isCollegeAdmin, isYearAdmi
       <button className={`accordion-heading ${openPanel === "defaults" ? "accordion-active" : ""}`} onClick={() => setOpenPanel(openPanel === "defaults" ? "" : "defaults")}><span><Users size={18} /> الأدمنز والصلاحيات</span><ChevronDown size={18} /></button>
       {openPanel === "defaults" ? <div className="accordion-body"><p className="muted">اختار سجلًا من المادة لتحديد نطاق الجروب أو السكشن. الدور يتحدد تلقائيًا من الكود: A–D للجروبات وa1–d6 للسكاشن.</p>
         <form className="form-grid" onSubmit={assignDefault}>
-          <InputField label="الجروب / السكشن"><select required value={defaultForm.groupId} onChange={(e) => setDefaultForm({ ...defaultForm, groupId: e.target.value })}><option value="">اختر الجروب أو السكشن</option>{data.groups.map((group) => <option key={group.id} value={group.id}>{group.code} · {group.name} · {currentCourseNameFrom(data, group.offering_id)}</option>)}</select></InputField>
+          <InputField label="الجروب / السكشن"><select required value={defaultForm.groupId} onChange={(e) => setDefaultForm({ ...defaultForm, groupId: e.target.value })}><option value="">اختر الجروب أو السكشن</option>{data.groups.filter((group) => group.is_active && roleForCode(String(group.code || "")) !== null && Boolean(byId(data.offerings, group.offering_id)?.is_active)).map((group) => <option key={group.id} value={group.id}>{group.code} · {group.name} · {currentCourseNameFrom(data, group.offering_id)}</option>)}</select></InputField>
           <InputField label="حساب الأدمن"><select required value={defaultForm.userId} onChange={(e) => setDefaultForm({ ...defaultForm, userId: e.target.value })}><option value="">اختر الحساب</option>{data.profiles.map((row) => <option key={row.id} value={row.id}>{fullName(row)} · {row.email || row.student_id || ""}</option>)}</select></InputField>
           <div className="form-submit"><button className="btn btn-primary" type="submit" disabled={busy}>تعيين النطاق <ShieldCheck size={15} /></button></div>
         </form>
