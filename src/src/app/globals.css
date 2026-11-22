@@ -253,6 +253,9 @@ tr:last-child td{border-bottom:0}
 .task-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
 .task-card{border:1px solid #e5ecf4;border-radius:14px;padding:16px;min-width:0}
 .task-card-top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.task-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.task-card-actions .btn{display:inline-flex;align-items:center;gap:5px}
+.task-form-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .task-type{color:#4f74a8;background:#eef4ff;border-radius:7px;padding:5px 8px;font-size:9px;font-weight:800}
 .task-card h3{font-size:13px;margin:15px 0 7px;color:#304863}
 .task-card p{font-size:10px;line-height:1.8;color:#8291a4;min-height:30px}
