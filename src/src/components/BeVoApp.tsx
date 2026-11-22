@@ -260,13 +260,20 @@ export default function BeVoApp() {
         }
         if (!live) return;
         setData({ ...next });
-        if (currentProfile) {
-          setProfileDraft({
-            first: currentProfile.first_name || "", middle: currentProfile.middle_name || "", third: currentProfile.third_name || "",
-            studentId: currentProfile.student_id || "", collegeId: currentProfile.college_id || "", levelId: currentProfile.study_level_id || "",
-            year: currentProfile.enrollment_year || "",
-          });
-        }
+        const metadata = (session.user.user_metadata || {}) as Record<string, unknown>;
+        const googleFullName = String(metadata.full_name || metadata.name || "").trim().split(/\s+/).filter(Boolean);
+        const googleFirstName = String(metadata.given_name || googleFullName[0] || "");
+        const googleMiddleName = String(metadata.middle_name || (googleFullName.length >= 3 ? googleFullName[1] : ""));
+        const googleThirdName = String(metadata.family_name || (googleFullName.length >= 3 ? googleFullName.slice(2).join(" ") : googleFullName[1] || ""));
+        setProfileDraft({
+          first: currentProfile?.first_name || googleFirstName,
+          middle: currentProfile?.middle_name || googleMiddleName,
+          third: currentProfile?.third_name || googleThirdName,
+          studentId: currentProfile?.student_id || "",
+          collegeId: currentProfile?.college_id || "",
+          levelId: currentProfile?.study_level_id || "",
+          year: currentProfile?.enrollment_year || "",
+        });
         const storedChoices: Record<string, { lectureId: string; groupId: string }> = {};
         next.selections.forEach((selection) => {
           storedChoices[selection.offering_id] = {
@@ -1026,7 +1033,7 @@ export default function BeVoApp() {
                   <button className="btn btn-primary btn-wide" type="submit" disabled={busy}>{busy ? "جاري الدخول…" : "تسجيل الدخول"} <ArrowLeft size={17} /></button>
                 </form>
                 <div className="or-separator"><span /> أو <span /></div>
-                <button className="btn btn-google btn-wide" type="button" onClick={signInGoogle} disabled={busy}><span className="google-g">G</span> المتابعة باستخدام Google</button>
+                <button className="btn btn-google btn-wide" type="button" onClick={signInGoogle} disabled={busy}><span className="google-g">G</span> المتابعة أو التسجيل باستخدام Google</button>
                 <div className="auth-bottom">ليس لديك حساب؟ <button className="text-button strong" type="button" onClick={() => setAuthScreen("signup")}>إنشاء حساب طالب</button></div>
               </>
             ) : null}
@@ -1050,6 +1057,8 @@ export default function BeVoApp() {
                   <InputField label="تأكيد كلمة المرور"><input required type="password" autoComplete="new-password" value={signupDraft.confirm} onChange={(e) => setSignupDraft({ ...signupDraft, confirm: e.target.value })} /></InputField>
                   <button className="btn btn-primary btn-wide" disabled={busy} type="submit">{busy ? "جاري إنشاء الحساب…" : "إرسال رمز التحقق"} <ArrowLeft size={17} /></button>
                 </form>
+                <div className="or-separator"><span /> أو <span /></div>
+                <button className="btn btn-google btn-wide" type="button" onClick={signInGoogle} disabled={busy}><span className="google-g">G</span> إنشاء حساب أو المتابعة باستخدام Google</button>
                 <div className="auth-bottom">لديك حساب؟ <button className="text-button strong" type="button" onClick={() => setAuthScreen("login")}>تسجيل الدخول</button></div>
               </>
             ) : null}
