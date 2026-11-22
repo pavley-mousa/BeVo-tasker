@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 
-const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://bevo-tasker.vercel.app").replace(/\\/$/, "");
+const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://bevo-tasker.vercel.app";
+const siteUrl = rawSiteUrl.endsWith("/") ? rawSiteUrl.slice(0, -1) : rawSiteUrl;
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const paths = [
