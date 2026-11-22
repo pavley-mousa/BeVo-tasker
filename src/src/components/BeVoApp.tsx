@@ -1078,6 +1078,13 @@ export default function BeVoApp() {
             ) : null}
           </div>
           <p className="auth-legal">باستخدام BeVo، استخدم بياناتك الأكاديمية الصحيحة واحفظ بيانات الدخول بأمان.</p>
+          <nav className="auth-public-links" aria-label="معلومات عامة عن BeVo">
+            <a href="/guides">الأدلة الدراسية</a>
+            <a href="/about">عن BeVo</a>
+            <a href="/privacy">الخصوصية</a>
+            <a href="/terms">الشروط</a>
+            <a href="/contact">تواصل معنا</a>
+          </nav>
         </div>
         {notice ? <div className={`toast toast-${notice.tone}`} role="status"><span>{notice.tone === "error" ? <AlertCircle size={17} /> : <CheckCircle2 size={17} />}</span>{notice.text}<button onClick={() => setNotice(null)} aria-label="إغلاق"><X size={15} /></button></div> : null}
         <SiteContentEditor canEdit={false} userId={session?.user?.id || null} />
