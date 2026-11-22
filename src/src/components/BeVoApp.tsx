@@ -5,7 +5,7 @@ import {
   ChevronDown, CircleHelp, ClipboardList, Clock3, ExternalLink, Eye, EyeOff,
   FileText, GraduationCap, Home, Layers, LogOut, MapPin, Menu, Plus, RefreshCw,
   Search, Settings, ShieldCheck, UserRound, Users, X, Sparkles, Save, Pencil,
-  AlertCircle, BadgeCheck, BookMarked, UserCog, Send, Link2,
+  AlertCircle, BadgeCheck, BookMarked, UserCog, Send, Link2, Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
@@ -146,6 +146,7 @@ export default function BeVoApp() {
   const [groupEdits, setGroupEdits] = useState<Record<string, { day: string; start: string; end: string; assistant: string; room: string; capacity: string }>>({});
   const [requestNotes, setRequestNotes] = useState<Record<string, string>>({});
   const [savingRequest, setSavingRequest] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   const notify = useCallback((text: string, tone: "success" | "error" | "info" = "success") => {
     setNotice({ text, tone });
@@ -658,6 +659,30 @@ export default function BeVoApp() {
     finally { setBusy(false); }
   }
 
+  function beginTaskEdit(task: Row) {
+    const dueDate = task.due_at ? new Date(task.due_at) : null;
+    const dueAt = dueDate && !Number.isNaN(dueDate.getTime())
+      ? new Date(dueDate.getTime() - dueDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+      : "";
+    setTaskForm({
+      offeringId: task.offering_id || "",
+      groupId: task.course_group_id || "",
+      type: task.task_type || "task",
+      title: task.title || "",
+      description: task.description || "",
+      dueAt,
+      reminder: String(Array.isArray(task.reminder_minutes) ? task.reminder_minutes[0] ?? 60 : 60),
+      published: task.is_published !== false,
+    });
+    setEditingTaskId(task.id);
+    setActiveSection("tasks");
+  }
+
+  function cancelTaskEdit() {
+    setEditingTaskId(null);
+    setTaskForm((current) => ({ ...current, title: "", description: "", dueAt: "" }));
+  }
+
   async function addTask(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -670,16 +695,50 @@ export default function BeVoApp() {
         (!taskForm.groupId || !data.scopedGroups.some((group) => group.id === taskForm.groupId && group.offering_id === taskForm.offeringId && group.is_active))) {
         throw new Error("أدمن الجروب أو السكشن لازم يختار نطاقه المعيّن له.");
       }
-      const { error } = await supabase.from("tasks").insert({
-        offering_id: taskForm.offeringId, course_group_id: taskForm.groupId || null, created_by: currentUserId,
-        task_type: taskForm.type, title: taskForm.title.trim(), description: taskForm.description.trim(),
+
+      const payload = {
+        offering_id: taskForm.offeringId,
+        course_group_id: taskForm.groupId || null,
+        task_type: taskForm.type,
+        title: taskForm.title.trim(),
+        description: taskForm.description.trim(),
         due_at: taskForm.dueAt ? new Date(taskForm.dueAt).toISOString() : null,
-        reminder_minutes: [Number(taskForm.reminder) || 60], enable_message: true, enable_sound: true,
+        reminder_minutes: [Number(taskForm.reminder) || 60],
+        enable_message: true,
+        enable_sound: true,
         is_published: taskForm.published,
-      });
+      };
+
+      if (editingTaskId) {
+        const { data: updated, error } = await supabase.from("tasks")
+          .update(payload).eq("id", editingTaskId).select("id").maybeSingle();
+        if (error) throw error;
+        if (!updated) throw new Error("لم يتم تعديل المنشور. قد لا تملك صلاحية إدارته.");
+        notify("تم تعديل المنشور بنجاح.");
+      } else {
+        const { error } = await supabase.from("tasks").insert({ ...payload, created_by: currentUserId });
+        if (error) throw error;
+        notify("تم نشر المهمة وإعدادات التذكير.");
+      }
+
+      setEditingTaskId(null);
+      setTaskForm((current) => ({ ...current, title: "", description: "", dueAt: "" }));
+      refresh();
+    } catch (error) { notify(messageOf(error), "error"); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteTask(task: Row) {
+    if (!window.confirm("هل تريد حذف المنشور «" + (task.title || "بدون عنوان") + "» نهائيًا؟")) return;
+    setBusy(true);
+    try {
+      const { data: deleted, error } = await supabase.from("tasks")
+        .delete().eq("id", task.id).select("id").maybeSingle();
       if (error) throw error;
-      setTaskForm({ ...taskForm, title: "", description: "", dueAt: "" });
-      notify("تم حفظ المهمة وإعدادات التذكير."); refresh();
+      if (!deleted) throw new Error("لم يتم حذف المنشور. قد لا تملك صلاحية إدارته.");
+      if (editingTaskId === task.id) cancelTaskEdit();
+      notify("تم حذف المنشور.");
+      refresh();
     } catch (error) { notify(messageOf(error), "error"); }
     finally { setBusy(false); }
   }
@@ -1159,7 +1218,7 @@ export default function BeVoApp() {
 
           {activeSection === "tasks" ? (
             <div className="stack-lg"><div className="page-heading"><div><span className="eyebrow"><ClipboardList size={14} /> التكليفات</span><h1>المهام والتكليفات</h1><p>تابع المهام المنشورة، أو أضف مهمة داخل النطاق الذي تديره.</p></div></div>
-              {isAdmin ? <Panel title="إضافة مهمة" subtitle="المهام لا تظهر للطلاب إلا بعد نشرها." icon={<Plus size={18} />}><form className="form-grid" onSubmit={addTask}>
+              {isAdmin ? <Panel title={editingTaskId ? "تعديل المنشور" : "إضافة مهمة"} subtitle={editingTaskId ? "عدّل بيانات المنشور أو غيّر حالة نشره للطلاب." : "المهام لا تظهر للطلاب إلا بعد نشرها."} icon={editingTaskId ? <Pencil size={18} /> : <Plus size={18} />}><form className="form-grid" onSubmit={addTask}>
                 <InputField label="المادة"><select required value={taskForm.offeringId} onChange={(e) => setTaskForm({ ...taskForm, offeringId: e.target.value, groupId: "" })}><option value="">اختر المادة</option>{manageableOfferings.map((row) => <option key={row.id} value={row.id}>{currentCourseName(row.id)} · {byId(data.years, row.academic_year_id)?.label || ""}</option>)}</select></InputField>
                 <InputField label={isGroupScopedOffering(taskForm.offeringId) ? "الجروب / السكشن المعيّن لك" : "الجروب / السكشن (اختياري)"}><select required={isGroupScopedOffering(taskForm.offeringId)} value={taskForm.groupId} onChange={(e) => setTaskForm({ ...taskForm, groupId: e.target.value })}>{isGroupScopedOffering(taskForm.offeringId) ? <option value="">اختر نطاقك</option> : <option value="">كل طلاب المادة</option>}{getGroupsForOffering(taskForm.offeringId).map((group) => <option key={group.id} value={group.id}>{group.code} · {group.name}</option>)}</select></InputField>
                 <InputField label="نوع المهمة"><select value={taskForm.type} onChange={(e) => setTaskForm({ ...taskForm, type: e.target.value })}><option value="task">تاسك</option><option value="lecture_task">تاسك محاضرة</option><option value="quiz">كويز</option><option value="assignment">واجب</option><option value="lecture">محاضرة</option></select></InputField>
@@ -1167,10 +1226,20 @@ export default function BeVoApp() {
                 <InputField label="آخر موعد"><input type="datetime-local" value={taskForm.dueAt} onChange={(e) => setTaskForm({ ...taskForm, dueAt: e.target.value })} /></InputField>
                 <InputField label="التذكير قبل الموعد (دقيقة)"><select value={taskForm.reminder} onChange={(e) => setTaskForm({ ...taskForm, reminder: e.target.value })}><option value="15">15 دقيقة</option><option value="30">30 دقيقة</option><option value="60">ساعة</option><option value="1440">يوم</option></select></InputField>
                 <InputField label="الوصف"><textarea rows={3} value={taskForm.description} onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} /></InputField>
-                <div className="form-submit check-submit"><label className="check-line"><input type="checkbox" checked={taskForm.published} onChange={(e) => setTaskForm({ ...taskForm, published: e.target.checked })} /> نشر المهمة للطلاب</label><button className="btn btn-primary" disabled={busy} type="submit">حفظ المهمة <Plus size={16} /></button></div>
+                <div className="form-submit check-submit"><label className="check-line"><input type="checkbox" checked={taskForm.published} onChange={(e) => setTaskForm({ ...taskForm, published: e.target.checked })} /> نشر المهمة للطلاب</label><div className="task-form-actions"><button className="btn btn-primary" disabled={busy} type="submit">{editingTaskId ? "حفظ التعديلات" : "نشر المهمة"} {editingTaskId ? <Save size={16} /> : <Plus size={16} />}</button>{editingTaskId ? <button className="btn btn-outline" disabled={busy} type="button" onClick={cancelTaskEdit}>إلغاء التعديل <X size={15} /></button> : null}</div></div>
               </form></Panel> : null}
-              <Panel title="المهام المنشورة" subtitle="المحتوى الذي تسمح به صلاحيات حسابك." icon={<ClipboardList size={18} />}>
-                {data.tasks.filter((task) => isAdmin ? true : task.is_published).length ? <div className="task-grid">{data.tasks.filter((task) => isAdmin ? true : task.is_published).sort((a,b) => String(a.due_at || "").localeCompare(String(b.due_at || ""))).map((task) => <article className="task-card" key={task.id}><div className="task-card-top"><span className="task-type">{task.task_type === "quiz" ? "كويز" : task.task_type === "assignment" ? "واجب" : task.task_type === "lecture" ? "محاضرة" : "تاسك"}</span><span className={`status-pill ${task.is_published ? "status-published" : ""}`}>{task.is_published ? "منشورة" : "مسودة"}</span></div><h3>{task.title}</h3><p>{task.description || "لا يوجد وصف إضافي."}</p><div className="task-meta"><span><BookOpen size={14} /> {currentCourseName(task.offering_id)}</span><span><Clock3 size={14} /> {task.due_at ? new Date(task.due_at).toLocaleString("ar-EG") : "بدون موعد"}</span></div></article>)}</div> : <EmptyState title="لا توجد مهام ظاهرة" detail="المهام المنشورة والمرتبطة بموادك ستظهر هنا." />}
+              <Panel title="المنشورات والمهام" subtitle={isAdmin ? "يمكنك تعديل أو حذف أي منشور داخل نطاق صلاحياتك." : "المنشورات المنشورة المرتبطة بموادك."} icon={<ClipboardList size={18} />}>
+                {data.tasks.filter((task) => isAdmin ? true : task.is_published).length ? <div className="task-grid">{data.tasks.filter((task) => isAdmin ? true : task.is_published).sort((a,b) => String(a.due_at || "").localeCompare(String(b.due_at || ""))).map((task) => <article className="task-card" key={task.id}>
+                  <div className="task-card-top">
+                    <span className="task-type">{task.task_type === "quiz" ? "كويز" : task.task_type === "assignment" ? "واجب" : task.task_type === "lecture" ? "محاضرة" : task.task_type === "lecture_task" ? "تاسك محاضرة" : "تاسك"}</span>
+                    <div className="task-card-actions">
+                      <span className={`status-pill ${task.is_published ? "status-published" : ""}`}>{task.is_published ? "منشورة" : "مسودة"}</span>
+                      {isAdmin ? <><button className="btn btn-outline btn-small" type="button" disabled={busy} onClick={() => beginTaskEdit(task)}><Pencil size={13} /> تعديل</button><button className="btn btn-danger-outline btn-small" type="button" disabled={busy} onClick={() => deleteTask(task)}><Trash2 size={13} /> حذف</button></> : null}
+                    </div>
+                  </div>
+                  <h3>{task.title}</h3><p>{task.description || "لا يوجد وصف إضافي."}</p>
+                  <div className="task-meta"><span><BookOpen size={14} /> {currentCourseName(task.offering_id)}</span><span><Clock3 size={14} /> {task.due_at ? new Date(task.due_at).toLocaleString("ar-EG") : "بدون موعد"}</span></div>
+                </article>)}</div> : <EmptyState title="لا توجد مهام ظاهرة" detail="المنشورات المنشورة والمرتبطة بموادك ستظهر هنا." />}
               </Panel>
             </div>
           ) : null}
